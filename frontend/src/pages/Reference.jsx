@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { RegionSelect, useRef_ } from '../components/common.jsx'
+import { RegionSelect, SourceTag, useRef_ } from '../components/common.jsx'
 import { date, money, quarterLabel } from '../format.js'
 
 const KIND_LABEL = { prices: 'Цены', indexes: 'Индексы', analogs: 'Объекты-аналоги', resources: 'Классификатор ресурсов' }
 
 export default function Reference() {
-  const { meta, regions, reload } = useRef_()
+  const { meta, regions, reload, user } = useRef_()
   const [regionId, setRegionId] = useState(null)
   const [zoneId, setZoneId] = useState('')
   const [quarter, setQuarter] = useState('2026-Q3')
   const [rows, setRows] = useState(null)
+  const [found, setFound] = useState(null)
+  const [q, setQ] = useState('')
+  const [applied, setApplied] = useState('')
   const [error, setError] = useState('')
   const [kind, setKind] = useState('prices')
   const [file, setFile] = useState(null)
@@ -21,11 +24,12 @@ export default function Reference() {
   useEffect(() => { setZoneId(region?.zones?.[0]?.id ?? '') }, [regionId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!regionId) return
-    const p = new URLSearchParams({ region_id: regionId, quarter })
+    const p = new URLSearchParams({ region_id: regionId, quarter, limit: 100 })
     if (zoneId) p.set('zone_id', zoneId)
+    if (applied) p.set('q', applied)
     setRows(null)
-    api.prices(p).then(setRows).catch((e) => setError(e.message))
-  }, [regionId, zoneId, quarter])
+    api.prices(p).then((r) => { setRows(r.items); setFound(r) }).catch((e) => setError(e.message))
+  }, [regionId, zoneId, quarter, applied])
 
   const upload = async (e) => {
     e.preventDefault()
@@ -57,24 +61,34 @@ export default function Reference() {
               {(meta?.quarters ?? []).map((q) => <option key={q} value={q}>{quarterLabel(q)}</option>)}
             </select></div>
         </div>
-        <div className="hint">Значение каждого источника приведено к выбранному кварталу индексом цен; ориентир — медиана источников.</div>
+        <form className="row" role="search" onSubmit={(e) => { e.preventDefault(); setApplied(q.trim()) }}>
+          <label htmlFor="rq" className="sr-only">Поиск ресурса</label>
+          <input id="rq" type="search" className="input" style={{ flex: '1 1 320px', width: 'auto' }} placeholder="Код КСР или часть наименования: бетон, 08.4.03, кабель АВВГ"
+            value={q} onChange={(e) => setQ(e.target.value)} />
+          <button type="submit" className="btn secondary">Найти</button>
+        </form>
+        <div className="hint">
+          {found && <>Ресурсов с ценами в регионе: {found.total_region}; найдено: {found.found}{found.found > 100 ? ', показаны первые 100' : ''}. </>}
+          Значение каждого источника приведено к выбранному кварталу индексом по сметным ценам ФГИС ЦС; ориентир — медиана источников.
+          Сметные цены ФГИС ЦС — реальные, ЕИС и рынок — синтетические.
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
       <div className="card">
         <div className="table-wrap">
           {rows && rows.length === 0 ? (
-            <div className="section"><div className="note">Для {region?.name} цены не загружены. Загрузите выгрузку ФГИС ЦС, контракты ЕИС или прайс-листы в формате CSV ниже.</div></div>
+            <div className="section"><div className="note">{applied ? 'Ничего не найдено.' : `Для региона «${region?.name}» цены не загружены. Загрузите выгрузку ФГИС ЦС, контракты ЕИС или прайс-листы в формате CSV ниже.`}</div></div>
           ) : (
             <table className="data" style={{ minWidth: 860 }}>
               <thead><tr><th scope="col">Код</th><th scope="col">Ресурс</th><th scope="col">Ед.</th>
-                <th scope="col" className="num">ФГИС ЦС, ₽</th><th scope="col" className="num">ЕИС, ₽</th><th scope="col" className="num">Рынок, ₽</th><th scope="col" className="num">Ориентир, ₽</th></tr></thead>
+                <th scope="col" className="num">ФГИС ЦС, ₽<div><SourceTag synthetic={false} /></div></th><th scope="col" className="num">ЕИС, ₽<div><SourceTag synthetic /></div></th><th scope="col" className="num">Рынок, ₽<div><SourceTag synthetic /></div></th><th scope="col" className="num">Ориентир, ₽</th></tr></thead>
               <tbody>
                 {!rows && <tr><td colSpan={7} className="muted">Загрузка…</td></tr>}
                 {rows?.map((r) => (
                   <tr key={r.code}>
                     <td>{r.code}</td><td><div style={{ fontWeight: 600 }}>{r.name}</div><div className="xs muted">{r.group}</div></td><td>{r.unit}</td>
-                    <td className="num">{money(r.sources.fgiscs?.value)}</td>
+                    <td className="num">{money(r.sources.fgiscs?.value)}{r.sources.fgiscs && r.sources.fgiscs.quarter !== quarter && <div className="xs muted">из {r.sources.fgiscs.quarter}</div>}</td>
                     <td className="num">{money(r.sources.eis?.value)}{r.sources.eis && <div className="xs muted">медиана {r.sources.eis.count}</div>}</td>
                     <td className="num">{money(r.sources.market?.value)}{r.sources.market && <div className="xs muted">медиана {r.sources.market.count}</div>}</td>
                     <td className="num" style={{ fontWeight: 700 }}>{money(r.benchmark)}</td>
@@ -89,7 +103,8 @@ export default function Reference() {
       <div className="cols">
         <section className="card section main">
           <h2>Загрузка справочника</h2>
-          <form onSubmit={upload} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {user?.role !== 'admin' && <div className="note">Загрузка справочников доступна администратору справочников.</div>}
+          <form onSubmit={upload} hidden={user?.role !== 'admin'} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="grid-auto">
               <div className="field"><label htmlFor="kind">Вид данных</label>
                 <select id="kind" className="select" value={kind} onChange={(e) => setKind(e.target.value)}>

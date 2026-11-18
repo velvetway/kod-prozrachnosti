@@ -6,17 +6,49 @@ import { LEVELS, rub } from '../format.js'
 const RefContext = createContext({ meta: null, regions: [] })
 export const useRef_ = () => useContext(RefContext)
 
+function Login({ onDone }) {
+  const [login, setLogin] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const submit = async (e) => {
+    e.preventDefault()
+    setError('')
+    try { onDone(await api.login(login, password)) } catch (err) { setError(err.message) }
+  }
+  return (
+    <div className="page narrow" style={{ maxWidth: 460, paddingTop: 48 }}>
+      <form className="card section" onSubmit={submit}>
+        <h1 style={{ fontSize: 22 }}>Вход в систему</h1>
+        <div className="field"><label htmlFor="login">Логин</label>
+          <input id="login" className="input" autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} /></div>
+        <div className="field"><label htmlFor="password">Пароль</label>
+          <input id="password" type="password" className="input" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+        {error && <div className="error" role="alert">{error}</div>}
+        <button type="submit" className="btn">Войти</button>
+        <div className="hint">Учётные записи прототипа: specialist / specialist — специалист по профилактике; admin / admin — администратор справочников. В рабочей установке задаются переменной APP_USERS.</div>
+      </form>
+    </div>
+  )
+}
+
 export function Layout() {
+  const [user, setUser] = useState(undefined)
   const [meta, setMeta] = useState(null)
   const [regions, setRegions] = useState([])
   const [error, setError] = useState('')
   const reload = () => Promise.all([api.meta(), api.regions()])
     .then(([m, r]) => { setMeta(m); setRegions(r) })
     .catch((e) => setError(e.message))
-  useEffect(() => { reload() }, [])
+  useEffect(() => {
+    api.me().then((u) => { setUser(u); reload() }).catch(() => setUser(null))
+    const onAuth = () => setUser(null)
+    window.addEventListener('auth-required', onAuth)
+    return () => window.removeEventListener('auth-required', onAuth)
+  }, [])
+  const logout = async () => { await api.logout().catch(() => {}); setUser(null) }
 
   return (
-    <RefContext.Provider value={{ meta, regions, reload }}>
+    <RefContext.Provider value={{ meta, regions, reload, user }}>
       <header className="header">
         <div className="header-inner">
           <Link to="/" className="brand">
@@ -29,17 +61,24 @@ export function Layout() {
             <NavLink to="/analogs">Объекты-аналоги</NavLink>
             <NavLink to="/journal">Журнал решений</NavLink>
           </nav>
-          <div className="user">Специалист · демо-доступ</div>
+          {user && (
+            <div className="user row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+              <span title={user.name}>{user.role_title} ({user.login})</span>
+              <button type="button" className="btn link" style={{ color: '#fff', minHeight: 32, padding: '0 4px' }} onClick={logout}>Выйти</button>
+            </div>
+          )}
         </div>
       </header>
-      {meta?.is_demo && (
+      {user && meta?.is_demo && (
         <div className="demo-banner" role="note">
-          <div>Загружены демонстрационные справочники цен для Брянской и Томской областей. Результаты расчёта
-            показывают работу системы и не являются данными о реальных ценах.</div>
+          <div><b>Данные прототипа.</b> Сметные цены ФГИС ЦС — реальные, выгружены с портала fgiscs.minstroyrf.ru
+            (Брянская и Томская области, IV кв. 2024 — III кв. 2026). Контракты ЕИС, рыночные предложения,
+            объекты-аналоги и демо-сметы — синтетические: выводы по ним не являются подтверждёнными.</div>
         </div>
       )}
-      {error && <div className="page"><div className="error">Сервер недоступен: {error}</div></div>}
-      <Outlet />
+      {user === null && <Login onDone={(u) => { setUser(u); setError(''); reload() }} />}
+      {user && error && <div className="page"><div className="error">Сервер недоступен: {error}</div></div>}
+      {user && <Outlet />}
     </RefContext.Provider>
   )
 }
@@ -99,4 +138,10 @@ export function Amounts({ s }) {
       {lines.length > 1 && <div className="xs muted">суммы не складываются: позиция может дать сигналы разных видов</div>}
     </div>
   )
+}
+
+export function SourceTag({ synthetic }) {
+  return synthetic
+    ? <span className="badge gray" title="Сгенерированы для демонстрации">синтетические</span>
+    : <span className="badge ok" title="Выгружены с портала ФГИС ЦС">реальные данные</span>
 }

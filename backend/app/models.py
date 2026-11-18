@@ -71,6 +71,7 @@ class ReferencePrice(Base):
     doc_url: Mapped[str] = mapped_column(String(500), default="")
     resource: Mapped[Resource] = relationship()
     zone: Mapped[PriceZone | None] = relationship()
+    dataset: Mapped[DatasetVersion] = relationship()
 
 
 class PriceIndex(Base):
@@ -182,3 +183,31 @@ class Decision(Base):
     author: Mapped[str] = mapped_column(String(120), default="Специалист (демо-доступ)")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     signal: Mapped[Signal] = relationship(back_populates="decisions")
+
+
+# ---------------------------------------------------------------- доступ и аудит
+class User(Base):
+    __tablename__ = "app_user"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    login: Mapped[str] = mapped_column(String(60), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(20))              # specialist | admin
+    password_hash: Mapped[str] = mapped_column(String(200))
+
+
+class SessionToken(Base):
+    __tablename__ = "app_session"
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    user: Mapped[User] = relationship()
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_event"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    user_login: Mapped[str] = mapped_column(String(60))
+    action: Mapped[str] = mapped_column(String(60))
+    object_ref: Mapped[str] = mapped_column(String(200), default="")
+    details: Mapped[dict] = mapped_column(JSON, default=dict)

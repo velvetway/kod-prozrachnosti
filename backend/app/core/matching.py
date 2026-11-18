@@ -7,6 +7,7 @@
 Порядок кандидатов фиксирован: по убыванию показателя, затем по коду ресурса."""
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from rapidfuzz import fuzz
 
@@ -40,6 +41,7 @@ def level(score: float) -> str:
     return "Нет"
 
 
+@lru_cache(maxsize=50000)
 def _norm(text: str) -> str:
     t = text.lower().replace("ё", "е").translate(_CONFUSABLES)
     t = re.sub(r"(\d),(\d)", r"\1.\2", t)
@@ -48,26 +50,33 @@ def _norm(text: str) -> str:
     return t
 
 
+@lru_cache(maxsize=50000)
+def _joined_tokens(text: str) -> str:
+    return " ".join(_tokens(text))
+
+
 def _tokens(text: str) -> list[str]:
     out = []
     for tok in _norm(text).split():
         if tok in _STOP:
             continue
-        out.append(tok[:6] if not tok[0].isdigit() and len(tok) > 6 else tok)   # грубое отсечение окончаний
+        out.append(tok[:5] if not tok[0].isdigit() and len(tok) > 5 else tok)   # грубое отсечение окончаний
     return out
 
 
-def _numbers(text: str) -> set[str]:
-    return {n.rstrip(".") for n in re.findall(r"\d+(?:\.\d+)?", _norm(text))}
+@lru_cache(maxsize=50000)
+def _numbers(text: str) -> frozenset[str]:
+    return frozenset(n.rstrip(".") for n in re.findall(r"\d+(?:\.\d+)?", _norm(text)))
 
 
 def similarity(item_name: str, resource_name: str, resource_attrs: str = "") -> float:
-    a, b = " ".join(_tokens(item_name)), " ".join(_tokens(resource_name))
+    a, b = _joined_tokens(item_name), _joined_tokens(resource_name)
     base = max(fuzz.token_set_ratio(a, b), fuzz.token_sort_ratio(a, b)) / 100
     item_nums, res_nums = _numbers(item_name), _numbers(resource_name + " " + resource_attrs)
-    if res_nums and not res_nums <= item_nums:
-        missing = len(res_nums - item_nums) / len(res_nums)
-        base *= 1 - 0.35 * missing
+    if res_nums and not res_nums <= item_nums:          # у ресурса есть характеристика, которой нет в позиции
+        base *= 1 - 0.35 * len(res_nums - item_nums) / len(res_nums)
+    if item_nums and not item_nums <= res_nums:          # у позиции есть характеристика, которой нет у ресурса
+        base *= 1 - 0.15 * len(item_nums - res_nums) / len(item_nums)
     return round(base, 4)
 
 
@@ -82,7 +91,7 @@ def candidates(item_code: str, item_name: str, item_unit: str, resources: list, 
             out.append(Candidate(r.id, r.code, r.name, r.unit, 1.0, f, "code"))
             continue
         out.append(Candidate(r.id, r.code, r.name, r.unit, similarity(item_name, r.name, r.attributes), f, "name"))
-    out.sort(key=lambda c: (-c.score, c.code))
+    out.sort(key=lambda c: (-c.score, c.method != "code", c.code))
     return out[:limit]
 
 

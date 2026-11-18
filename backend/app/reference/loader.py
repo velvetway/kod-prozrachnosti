@@ -113,6 +113,8 @@ def import_prices(s: Session, data: bytes, file_name: str, is_demo: bool = False
         raise ImportError_("Файл не содержит строк с ценами")
     dv = _new_version(s, "prices", file_name, data, len(rows), is_demo, note)
     resources = {r.code: r for r in s.scalars(select(Resource))}
+    regions: dict[str, Region] = {}
+    zones: dict[tuple, PriceZone | None] = {}
     for i, row in enumerate(rows, start=2):
         _need(row, ["source", "ksr_code", "region", "quarter", "price"], i)
         if row["source"] not in PRICE_SOURCES:
@@ -126,8 +128,13 @@ def import_prices(s: Session, data: bytes, file_name: str, is_demo: bool = False
             s.add(res)
             s.flush()
             resources[res.code] = res
-        region = _region(s, row["region"], i)
-        zone = _zone(s, region, row.get("zone", ""), i)
+        if row["region"] not in regions:
+            regions[row["region"]] = _region(s, row["region"], i)
+        region = regions[row["region"]]
+        zkey = (region.id, row.get("zone", ""))
+        if zkey not in zones:
+            zones[zkey] = _zone(s, region, row.get("zone", ""), i)
+        zone = zones[zkey]
         s.add(ReferencePrice(resource_id=res.id, region_id=region.id, zone_id=zone.id if zone else None,
                              dataset_id=dv.id, source=row["source"], quarter=row["quarter"],
                              price=_num(row["price"], i, "price"), doc_ref=row.get("doc_ref", ""),
@@ -172,8 +179,16 @@ def import_analogs(s: Session, data: bytes, file_name: str, is_demo: bool = Fals
     return dv
 
 
+FOLDER_NOTES = {
+    "fgiscs": "Реальные данные: сметные цены строительных ресурсов с публичного портала ФГИС ЦС "
+              "(fgiscs.minstroyrf.ru), выгрузка tools/fetch_fgiscs.py",
+    "demo": "Синтетические данные для демонстрации прототипа (контракты ЕИС, рыночные предложения, "
+            "объекты-аналоги), сгенерированы tools/make_demo_data.py",
+}
+
+
 def load_directory(s: Session, folder: Path, is_demo: bool) -> None:
-    note = "Синтетические данные для демонстрации прототипа" if is_demo else ""
+    note = FOLDER_NOTES.get(folder.name, "Синтетические данные" if is_demo else "")
     for name, fn in (("resources.csv", import_resources), ("zones.csv", import_zones)):
         if (folder / name).exists():
             fn(s, (folder / name).read_bytes())
@@ -186,10 +201,13 @@ def load_directory(s: Session, folder: Path, is_demo: bool) -> None:
 def init_db(load_demo: bool = True) -> None:
     Base.metadata.create_all(engine)
     from ..db import SessionLocal
+    from ..auth import seed_users
     with SessionLocal() as s:
         seed_regions(s)
+        seed_users(s)
         if load_demo and not s.scalar(select(func.count()).select_from(DatasetVersion)):
-            demo = REFERENCE_DIR / "demo"
-            if demo.exists():
-                load_directory(s, demo, is_demo=True)
+            for name, is_demo in (("fgiscs", False), ("demo", True)):
+                folder = REFERENCE_DIR / name
+                if folder.exists():
+                    load_directory(s, folder, is_demo=is_demo)
         s.commit()

@@ -1,0 +1,44 @@
+{
+ "три источника": {
+  "docs": 3,
+  "rows": 25,
+  "parsed": 25,
+  "to_match": 24,
+  "matched_ok": 24,
+  "nomatch_expected": 1,
+  "nomatch_ok": 1,
+  "tp": 7,
+  "fp": 0,
+  "fn": 0,
+  "explained": 7,
+  "active": 7,
+  "reproducible": 3,
+  "seconds": [
+   0.349,
+   0.439,
+   0.112
+  ],
+  "errors": []
+ },
+ "только ФГИС ЦС": {
+  "docs": 3,
+  "rows": 25,
+  "parsed": 25,
+  "to_match": 24,
+  "matched_ok": 24,
+  "nomatch_expected": 1,
+  "nomatch_ok": 1,
+  "tp": 7,
+  "fp": 0,
+  "fn": 0,
+  "explained": 7,
+  "active": 7,
+  "reproducible": 3,
+  "seconds": [
+   0.194,
+   0.306,
+   0.101
+  ],
+  "errors": []
+ }
+}

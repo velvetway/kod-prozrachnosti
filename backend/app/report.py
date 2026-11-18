@@ -40,10 +40,17 @@ def build(check: Check) -> bytes:
 
     doc.add_heading(f"Отчёт о проверке № {check.number}", level=1)
     doc.add_paragraph(check.title)
-    if demo:
+    synthetic_used = [x for x in check.params["sources"] if x in ("eis", "market")]
+    if demo and (synthetic_used or check.object_type):
         p = doc.add_paragraph()
-        r = p.add_run("Расчёт выполнен на демонстрационных справочниках. Результаты не являются "
-                      "подтверждёнными данными о ценах.")
+        parts = []
+        if synthetic_used:
+            parts.append("контракты-аналоги ЕИС и рыночные предложения")
+        if check.object_type:
+            parts.append("объекты-аналоги для контроля объёмов")
+        r = p.add_run("Сметные цены ФГИС ЦС — реальные данные портала fgiscs.minstroyrf.ru. "
+                      f"Синтетические (демонстрационные) данные: {', '.join(parts)}. Выводы, зависящие от "
+                      "синтетических данных, не являются подтверждёнными.")
         r.bold = True
         r.font.color.rgb = RGBColor(0x9A, 0x1C, 0x14)
 
@@ -56,7 +63,10 @@ def build(check: Check) -> bytes:
         ("Источники ориентиров", ", ".join(SOURCES[x] for x in check.params["sources"])),
         ("Пороги, %", f"цена {check.params['price_thresholds']}; объём {check.params['volume_thresholds']}; "
                       f"удорожание {check.params['escalation_thresholds']} (средний, высокий)"),
-        ("Версии справочников", "; ".join(f"{k}: {v['code']} ({v['sha256'][:12]})" for k, v in check.data_versions.items())),
+        ("Версии справочников", "; ".join(
+            f"{code} — {v['source_file']}, {v['records']} записей, "
+            f"{'синтетические' if v['is_demo'] else 'реальные'}, SHA-256 {v['sha256'][:12]}…"
+            for code, v in check.data_versions.items())),
         ("Контрольная сумма результата", check.result_sha256),
         ("Дата проверки", check.created_at.strftime("%d.%m.%Y %H:%M")),
     ]
@@ -119,10 +129,12 @@ def build(check: Check) -> bytes:
             doc.add_paragraph(f"Сумма: {sg.details['overpay_formula']}")
         if sg.kind == "price":
             for src in sg.details.get("sources", []):
-                doc.add_paragraph(f"{src['title']}: {fmt(src['value'])} ₽ (записей: {src['count']})",
+                kind = "синтетические данные" if src.get("synthetic") else "реальные данные"
+                doc.add_paragraph(f"{src['title']}: {fmt(src['value'])} ₽ (записей: {src['count']}; {kind})",
                                   style="List Bullet")
                 for row in src["rows"][:8]:
-                    doc.add_paragraph(f"{row['doc_ref']}: {fmt(row['price'])} ₽ × индекс {row['index']} = "
+                    basis = f" ({row['index_basis']})" if row.get("index_basis") and row["index"] != 1 else ""
+                    doc.add_paragraph(f"{row['doc_ref']}: {fmt(row['price'])} ₽ × индекс {row['index']}{basis} = "
                                       f"{fmt(row['indexed'])} ₽", style="List Bullet 2")
         if sg.kind == "volume":
             d = sg.details
@@ -130,8 +142,9 @@ def build(check: Check) -> bytes:
                               f"{fmt(d['low'], 4)}–{fmt(d['high'], 4)}; {d['scope']}, объектов: {d['count']}.")
         if sg.kind == "escalation":
             d = sg.details
-            doc.add_paragraph(f"Исходная цена {fmt(d['base_price'])} ₽ ({d['base_quarter']}); индекс группы "
-                              f"«{d['group']}» {d['index']}.")
+            doc.add_paragraph(f"Исходная цена {fmt(d['base_price'])} ₽ ({d['base_quarter']}); индекс {d['index']} — "
+                              f"{d.get('index_basis', d['group'])}"
+                              f"{', ресурсов: ' + str(d['index_n']) if d.get('index_n') else ''} (по сметным ценам ФГИС ЦС).")
         if it.match and it.match.level in ("Низкая", "Средняя"):
             doc.add_paragraph(f"Сопоставимость {it.match.level.lower()} ({it.match.score:.2f}): {it.match.note}.")
         for dec in sg.decisions:

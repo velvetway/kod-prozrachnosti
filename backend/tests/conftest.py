@@ -18,6 +18,7 @@ DEMO = Path(__file__).resolve().parents[2] / "demo"
 def client():
     from app.main import app
     with TestClient(app) as c:
+        assert c.post("/api/login", json={"login": "admin", "password": "admin"}).status_code == 200
         yield c
 
 

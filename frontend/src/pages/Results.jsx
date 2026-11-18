@@ -51,7 +51,7 @@ function PriceTable({ items, onPick }) {
           return (
             <tr key={it.id}>
               <td>{it.position}</td>
-              <td><div style={{ fontWeight: 600 }}>{it.name}</div>{it.code && it.code !== it.match?.resource?.code && <div className="xs muted">код в документе {it.code}</div>}</td>
+              <td><div style={{ fontWeight: 600 }} className="clamp" title={it.name}>{it.name}</div>{it.code && it.code !== it.match?.resource?.code && <div className="xs muted">код в документе {it.code}</div>}</td>
               <td className="num">{qty(it.quantity)} {it.unit}</td>
               <td className="num">{money(it.price)}
                 {s?.actual != null && it.match.unit_factor !== 1 && <div className="xs muted">= {money(s.actual)} за {unitRes}</div>}</td>
@@ -95,7 +95,7 @@ function VolumeTable({ items, check }) {
             return (
               <tr key={it.id}>
                 <td>{it.position}</td>
-                <td style={{ fontWeight: 600 }}>{it.name}</td>
+                <td style={{ fontWeight: 600, minWidth: 240 }}><div className="clamp" title={it.name}>{it.name}</div></td>
                 <td className="num">{qty(it.quantity * it.match.unit_factor)} {u}</td>
                 <td className="num">{num(s.actual, 4)}</td>
                 <td className="num">{num(s.benchmark, 4)}</td>
@@ -137,7 +137,7 @@ function EscalationTable({ items, check }) {
             return (
               <tr key={it.id}>
                 <td>{it.position}</td>
-                <td style={{ fontWeight: 600 }}>{it.name}</td>
+                <td style={{ fontWeight: 600, minWidth: 240 }}><div className="clamp" title={it.name}>{it.name}</div></td>
                 <td className="num">{money(it.base_price)}</td>
                 <td className="num">{money(it.price)}</td>
                 <td className="num">{pct(s.actual)}</td>
@@ -255,16 +255,16 @@ export default function Results() {
       </div>
 
       <div className="hint">
-        Ориентир — медиана значений источников ({check.params.sources.map((x) => ({ fgiscs: 'ФГИС ЦС', eis: 'ЕИС', market: 'рынок' })[x]).join(', ')}),
-        приведённых к кварталу проверки индексом цен. Пороги цены {check.params.price_thresholds.join(' / ')} %. Сигнал указывает на позицию для проверки и не является выводом о нарушении.
+        Ориентир — медиана значений источников ({check.params.sources.map((x) => ({ fgiscs: 'ФГИС ЦС — реальные', eis: 'ЕИС — синтетические', market: 'рынок — синтетические' })[x]).join(', ')}),
+        приведённых к кварталу проверки индексом, рассчитанным по сметным ценам ФГИС ЦС. Пороги цены {check.params.price_thresholds.join(' / ')} %. Сигнал указывает на позицию для проверки и не является выводом о нарушении.
       </div>
 
       <details className="card section">
         <summary>Версии данных и контрольные суммы</summary>
         <div className="small" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div>Документ: <span className="mono">{check.file_sha256}</span></div>
-          {Object.entries(check.data_versions).map(([k, v]) => (
-            <div key={k}>{({ prices: 'Цены', indexes: 'Индексы', analogs: 'Объекты-аналоги' })[k]}: {v.code}{v.is_demo ? ' (демо)' : ''} · <span className="mono">{v.sha256}</span></div>
+          {Object.entries(check.data_versions).map(([code, v]) => (
+            <div key={code}>{code} · {v.source_file} · {v.records} записей · {v.is_demo ? 'синтетические' : 'реальные'} · <span className="mono">{v.sha256}</span></div>
           ))}
           <div>Результат: <span className="mono">{check.result_sha256}</span></div>
         </div>

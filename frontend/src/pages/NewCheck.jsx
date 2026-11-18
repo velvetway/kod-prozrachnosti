@@ -110,7 +110,7 @@ export default function NewCheck() {
           <div className="hint">Файл обрабатывается на сервере организации; в отчёт записывается его контрольная сумма.</div>
           {demo.length > 0 && (
             <details>
-              <summary>Демо-сметы с заранее известными отклонениями</summary>
+              <summary>Демо-сметы с заранее известными отклонениями (документы синтетические, ресурсы и цены — из ФГИС ЦС)</summary>
               <div className="demo-list" style={{ marginTop: 10 }}>
                 {demo.map((d) => (
                   <div key={d.file} className="demo-item">
@@ -176,12 +176,16 @@ export default function NewCheck() {
           <h2>3. Ориентиры и пороги</h2>
           <fieldset className="row" style={{ gap: '4px 28px' }}>
             <legend className="legend" style={{ paddingBottom: 6 }}>Источники ценовых ориентиров</legend>
-            {SOURCES.map(([v, l]) => (
-              <label key={v} className="check">
-                <input type="checkbox" checked={sources.includes(v)}
-                  onChange={() => setSources(sources.includes(v) ? sources.filter((x) => x !== v) : [...sources, v])} /> {l}
-              </label>
-            ))}
+            {SOURCES.map(([v, l]) => {
+              const st = meta?.source_status?.[v]
+              return (
+                <label key={v} className="check">
+                  <input type="checkbox" checked={sources.includes(v)}
+                    onChange={() => setSources(sources.includes(v) ? sources.filter((x) => x !== v) : [...sources, v])} /> {l}
+                  {st && <span className="xs muted">({st === 'real' ? 'реальные' : st === 'synthetic' ? 'синтетические' : 'реальные и синтетические'})</span>}
+                </label>
+              )
+            })}
           </fieldset>
           <div className="grid-auto">
             {[['p', 'Цена'], ['v', 'Объём на 1 м²'], ['e', 'Удорожание сверх индекса']].map(([k, l]) => (
@@ -196,7 +200,7 @@ export default function NewCheck() {
               </fieldset>
             ))}
           </div>
-          <div className="hint">Пороги — рабочие значения прототипа, уточняются на пилоте. Они записываются в отчёт вместе с версиями справочников.</div>
+          <div className="hint">Чтобы считать только по реальным данным, оставьте один источник — ФГИС ЦС. Пороги — рабочие значения прототипа, уточняются на пилоте; они записываются в отчёт вместе с версиями справочников.</div>
         </section>
 
         {error && <div className="error" role="alert">{error}</div>}

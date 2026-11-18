@@ -139,3 +139,5 @@ details > summary { cursor: pointer; color: var(--primary); font-weight: 600; mi
   .page { padding: 16px; }
   .check-card .aside { border-left: 0; border-top: 1px solid var(--line); }
 }
+
+.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

@@ -7,19 +7,19 @@ from sqlalchemy.orm import Session
 
 from ..config import (DEFAULT_ESCALATION_THRESHOLDS, DEFAULT_PRICE_THRESHOLDS,
                       DEFAULT_VOLUME_THRESHOLDS)
-from ..models import Check, CheckItem, DatasetVersion, Match, Resource, Signal
+from ..models import Check, CheckItem, DatasetVersion, Match, ReferencePrice, Resource, Signal
 from . import calc, matching, parser
 from .calc import fmt
 
 ACTIVE_LEVELS = ("high", "medium", "review")
 
 
-def _latest_versions(s: Session) -> dict:
-    out = {}
-    for kind in ("prices", "indexes", "analogs"):
-        dv = s.scalar(select(DatasetVersion).where(DatasetVersion.kind == kind).order_by(DatasetVersion.id.desc()))
-        if dv:
-            out[kind] = {"code": dv.code, "sha256": dv.sha256, "is_demo": dv.is_demo}
+def _current_versions(s: Session) -> dict:
+    """Все загруженные версии справочников (каждая проверка ссылается на них)."""
+    out: dict[str, dict] = {}
+    for dv in s.scalars(select(DatasetVersion).order_by(DatasetVersion.id)):
+        out[dv.code] = {"kind": dv.kind, "sha256": dv.sha256, "is_demo": dv.is_demo, "records": dv.records,
+                        "source_file": dv.source_file}
     return out
 
 
@@ -45,7 +45,7 @@ def create_check(s: Session, data: bytes, file_name: str, *, region_id: int, zon
                   file_sha256=hashlib.sha256(data).hexdigest(), region_id=region_id, zone_id=zone_id,
                   quarter=quarter, base_quarter=base_quarter if doc.has_base_price else None,
                   object_type=object_type or None, capacity=capacity or None, params=params,
-                  data_versions=_latest_versions(s))
+                  data_versions=_current_versions(s))
     s.add(check)
     s.flush()
     for pos, it in enumerate(doc.items, start=1):
@@ -104,7 +104,8 @@ def evaluate_item(s: Session, check: Check, item: CheckItem, idx: calc.IndexBook
         details = {
             "unit": res.unit, "quantity_res": round(qty_res, 4),
             "sources": [{"source": sv.source, "title": calc.SOURCE_TITLES[sv.source], "value": sv.value,
-                         "count": len(sv.rows), "rows": sv.rows, "note": sv.note} for sv in bm.sources],
+                         "count": len(sv.rows), "rows": sv.rows, "note": sv.note, "synthetic": sv.synthetic}
+                        for sv in bm.sources],
             "method": "медиана значений источников" if len(bm.sources) > 1 else "единственный источник",
             "thresholds": p["price_thresholds"], "notes": bm.notes,
             "overpay_formula": f"({fmt(price_res)} − {fmt(bm.value)}) × {fmt(qty_res, 3)} {res.unit} = {fmt(overpay)} ₽"
@@ -142,8 +143,8 @@ def evaluate_item(s: Session, check: Check, item: CheckItem, idx: calc.IndexBook
 
     # --- удорожание относительно индекса
     if check.base_quarter and item.base_price:
-        k, ok = idx.coef(res.group, check.base_quarter, check.quarter)
-        if ok:
+        k, info = idx.coef(res, check.base_quarter, check.quarter)
+        if info["ok"]:
             claimed = (item.price / item.base_price - 1) * 100
             allowed = (k - 1) * 100
             excess = ((item.price / item.base_price) / k - 1) * 100
@@ -156,7 +157,8 @@ def evaluate_item(s: Session, check: Check, item: CheckItem, idx: calc.IndexBook
                          f"индекс {check.base_quarter} → {check.quarter}: {fmt(allowed, 1)} %; "
                          f"превышение: {fmt(item.price / item.base_price, 4)} / {fmt(k, 4)} − 1 = {fmt(excess, 1)} %"),
                 details={"base_price": item.base_price, "base_quarter": check.base_quarter, "index": round(k, 4),
-                         "group": res.group, "thresholds": p["escalation_thresholds"],
+                         "group": res.group, "index_basis": info["title"], "index_n": info["n"],
+                         "thresholds": p["escalation_thresholds"],
                          "overpay_formula": (f"({fmt(item.price)} − {fmt(item.base_price)} × {fmt(k, 4)}) × "
                                              f"{fmt(item.quantity, 3)} {item.unit} = {fmt(overpay)} ₽")
                          if overpay > 0 else "Превышения нет"}))
@@ -187,8 +189,19 @@ def refresh_status(check: Check) -> None:
         check.status = "Ожидает решения"
 
 
+def region_resources(s: Session, region_id: int) -> list[Resource]:
+    """Ресурсы, для которых в регионе есть хотя бы одна цена; если таких нет — весь классификатор."""
+    priced = select(ReferencePrice.resource_id).where(ReferencePrice.region_id == region_id).distinct()
+    found = list(s.scalars(select(Resource).where(Resource.id.in_(priced)).order_by(Resource.code)))
+    return found or list(s.scalars(select(Resource).order_by(Resource.code)))
+
+
 def run(s: Session, check: Check, rematch: bool = True) -> None:
-    resources = list(s.scalars(select(Resource).order_by(Resource.code)))
+    resources = region_resources(s, check.region_id)
+    known = {r.code for r in resources}
+    codes = {it.code for it in check.items if it.code and it.code not in known}
+    if codes:   # ресурс с указанным кодом сопоставляется, даже если в регионе для него нет цены
+        resources += list(s.scalars(select(Resource).where(Resource.code.in_(codes))))
     idx = calc.IndexBook(s, check.region_id)
     for item in check.items:
         if rematch or not item.match:

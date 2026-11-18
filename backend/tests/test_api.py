@@ -12,7 +12,10 @@ def test_signal_card_has_sources_and_formula(client, demo):
     c = run_demo(client, demo["01_bryansk_school_smeta.xlsx"])
     sig = next(s for it in c["items"] for s in it["signals"] if s["level"] == "high" and s["kind"] == "price")
     card = client.get(f"/api/signals/{sig['id']}").json()["signal"]
-    assert {s["source"] for s in card["details"]["sources"]} == {"fgiscs", "eis", "market"}
+    srcs = {s["source"]: s for s in card["details"]["sources"]}
+    assert set(srcs) == {"fgiscs", "eis", "market"}
+    assert srcs["fgiscs"]["synthetic"] is False and srcs["eis"]["synthetic"] and srcs["market"]["synthetic"]
+    assert srcs["fgiscs"]["rows"][0]["doc_url"].startswith("https://fgiscs.minstroyrf.ru/")
     assert "×" in card["formula"] and "%" in card["formula"]
     assert all(r["doc_ref"] for s in card["details"]["sources"] for r in s["rows"])
 
@@ -44,12 +47,12 @@ def test_rejects_bad_input(client, demo):
 
 def test_csv_upload_and_reference_import(client, demo):
     d = demo["03_bryansk_road_smeta.xlsx"]
-    csv = "Наименование;Ед. изм.;Количество;Цена\nПесок строительный;м3;100;800\nИтого;;;\n".encode()
+    csv = "Наименование;Ед. изм.;Количество;Цена\nПесок природный для строительных работ II класс, очень мелкий;м3;100;800\nИтого;;;\n".encode()
     r = client.post("/api/checks", files={"file": ("road.csv", csv)}, data={"region_id": str(d["region_id"]), "quarter": "2026-Q2"})
     assert r.status_code == 200
-    imp = "source,ksr_code,region,zone,quarter,price,doc_ref\nmarket,Д04.02,Брянская область,1,2026-Q4,1000,Тест\n"
+    imp = "source,ksr_code,region,zone,quarter,price,doc_ref\nmarket,02.3.01.02-1114,Брянская область,1,2026-Q3,1000,Тест\n"
     r = client.post("/api/reference/import", data={"kind": "prices"}, files={"file": ("p.csv", imp.encode())})
     assert r.status_code == 200 and r.json()["records"] == 1
-    bad = "source,ksr_code,region,quarter,price\nfgiscs,Д04.02,Неизвестный край,2026-Q3,10\n"
+    bad = "source,ksr_code,region,quarter,price\nfgiscs,02.3.01.02-1114,Неизвестный край,2026-Q3,10\n"
     r = client.post("/api/reference/import", data={"kind": "prices"}, files={"file": ("b.csv", bad.encode())})
     assert r.status_code == 422 and "Неизвестный край" in r.json()["detail"]

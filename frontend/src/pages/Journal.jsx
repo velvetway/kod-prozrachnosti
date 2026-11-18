@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api.js'
-import { Badge } from '../components/common.jsx'
+import { Badge, useRef_ } from '../components/common.jsx'
 import { KINDS, date, pct } from '../format.js'
 
 export default function Journal() {
+  const { user } = useRef_()
   const [rows, setRows] = useState(null)
+  const [audit, setAudit] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => { api.journal().then(setRows).catch((e) => setError(e.message)) }, [])
+  useEffect(() => { if (user?.role === 'admin') api.audit().then(setAudit).catch(() => {}) }, [user])
 
   return (
     <div className="page">
@@ -38,6 +41,21 @@ export default function Journal() {
           </div>
         )}
       </div>
+      {audit && (
+        <>
+          <h2>Журнал аудита</h2>
+          <div className="hint">Все действия пользователей: вход, проверки, повторные расчёты, ручные сопоставления, решения, загрузка справочников. Виден администратору.</div>
+          <div className="card table-wrap">
+            <table className="data" style={{ minWidth: 760 }}>
+              <thead><tr><th scope="col">Время</th><th scope="col">Пользователь</th><th scope="col">Действие</th><th scope="col">Объект</th><th scope="col">Подробности</th></tr></thead>
+              <tbody>{audit.map((e) => (
+                <tr key={e.id}><td style={{ whiteSpace: 'nowrap' }}>{date(e.at)}</td><td>{e.user}</td><td>{e.action}</td><td>{e.object || '—'}</td>
+                  <td className="xs muted">{Object.entries(e.details || {}).map(([k, v]) => `${k}: ${typeof v === 'string' && v.length > 24 ? v.slice(0, 12) + '…' : v}`).join('; ') || '—'}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }

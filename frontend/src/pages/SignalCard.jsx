@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api.js'
-import { Badge, Loading, useRef_ } from '../components/common.jsx'
+import { Badge, Loading, SourceTag, useRef_ } from '../components/common.jsx'
 import { KINDS, date, money, num, pct, qty, quarterLabel } from '../format.js'
 
 function PriceBlock({ s, item }) {
@@ -33,11 +33,11 @@ function PriceBlock({ s, item }) {
             <tbody>
               {d.sources.map((src) => src.rows.map((r, i) => (
                 <tr key={`${src.source}-${i}`}>
-                  <td>{i === 0 && <><div style={{ fontWeight: 600 }}>{src.title}</div><div className="xs muted">значение источника {money(src.value)} ₽{src.count > 1 ? `, медиана ${src.count}` : ''}</div></>}</td>
+                  <td>{i === 0 && <><div style={{ fontWeight: 600 }}>{src.title}</div><div className="xs muted">значение источника {money(src.value)} ₽{src.count > 1 ? `, медиана ${src.count}` : ''}</div><div style={{ marginTop: 4 }}><SourceTag synthetic={src.synthetic} /></div></>}</td>
                   <td>{r.doc_url ? <a href={r.doc_url} target="_blank" rel="noreferrer">{r.doc_ref}</a> : r.doc_ref}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{r.quarter}</td>
                   <td className="num">{money(r.price)}</td>
-                  <td className="num">{num(r.index, 4)}</td>
+                  <td className="num">{num(r.index, 4)}{r.index !== 1 && r.index_basis && <div className="xs muted" style={{ whiteSpace: 'normal', minWidth: 140 }}>{r.index_basis}</div>}</td>
                   <td className="num">{money(r.indexed)}</td>
                 </tr>
               )))}
@@ -57,6 +57,7 @@ function VolumeBlock({ s, check }) {
       <section className="card section">
         <h2>Расчёт отклонения расхода</h2>
         <div className="formula"><div style={{ fontWeight: 700 }}>{s.formula}</div><div>Стоимость перерасхода: {d.overpay_formula}</div></div>
+        <div className="note">Удельные расходы объектов-аналогов в прототипе синтетические.</div>
         <div className="hint">Объект: {check.object_type}, {num(check.capacity, 0)} м². Медиана {num(d.median, 4)} {d.unit}/м², коридор {num(d.low, 4)}–{num(d.high, 4)}; {d.scope}. Пороги: {d.thresholds.join(' / ')} %.</div>
       </section>
       <section className="card section">

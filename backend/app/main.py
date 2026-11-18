@@ -3,21 +3,22 @@ import json
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import report
+from . import auth, report
+from .auth import current_user, require_admin
 from .config import (DEMO_DIR, DEFAULT_ESCALATION_THRESHOLDS, DEFAULT_PRICE_THRESHOLDS, DEFAULT_VOLUME_THRESHOLDS,
                      FRONTEND_DIST, MAX_UPLOAD_BYTES)
 from .core import matching, pipeline
 from .core.calc import q_key
 from .core.parser import ParseError
 from .db import get_session
-from .models import (AnalogObject, Check, CheckItem, DatasetVersion, Decision, PriceIndex, PriceZone,
+from .models import (AuditEvent, User, AnalogObject, Check, CheckItem, DatasetVersion, Decision, PriceIndex, PriceZone,
                      ReferencePrice, Region, Resource, Signal)
 from .reference import loader
 
@@ -28,8 +29,9 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Мониторинг ценовых рисков в закупках строительных материалов", version="0.1.0",
+app = FastAPI(title="Мониторинг ценовых рисков в закупках строительных материалов", version="0.2.0",
               lifespan=lifespan)
+api = APIRouter(dependencies=[Depends(current_user)])
 
 DECISIONS = ["Отклонение обосновано", "Запросить обоснование цены", "Передать на проверку",
              "Сопоставление неверно"]
@@ -86,20 +88,28 @@ def _get_check(s: Session, check_id: int) -> Check:
 
 
 # ---------------------------------------------------------------- справочники
-@app.get("/api/meta")
+@api.get("/api/meta")
 def meta(s: Session = Depends(get_session)):
     quarters = sorted({q for (q,) in s.execute(select(ReferencePrice.quarter).distinct())} |
                       {q for (q,) in s.execute(select(PriceIndex.quarter).distinct())}, key=q_key)
     versions = [{"code": d.code, "kind": d.kind, "records": d.records, "sha256": d.sha256, "is_demo": d.is_demo,
                  "source_file": d.source_file, "loaded_at": d.loaded_at.isoformat(), "note": d.note}
                 for d in s.scalars(select(DatasetVersion).order_by(DatasetVersion.id.desc()))]
+    status = {}
+    for src, demo in s.execute(select(ReferencePrice.source, DatasetVersion.is_demo).distinct()
+                               .join(DatasetVersion, DatasetVersion.id == ReferencePrice.dataset_id)):
+        status.setdefault(src, set()).add("synthetic" if demo else "real")
+    source_status = {k: ("mixed" if len(v) > 1 else next(iter(v))) for k, v in status.items()}
+    analogs_demo = s.scalar(select(func.count()).select_from(AnalogObject).join(
+        DatasetVersion, DatasetVersion.id == AnalogObject.dataset_id).where(DatasetVersion.is_demo)) or 0
     return {"quarters": quarters, "object_types": OBJECT_TYPES, "decisions": DECISIONS,
+            "source_status": source_status, "analogs_status": "synthetic" if analogs_demo else "real",
             "defaults": {"price_thresholds": DEFAULT_PRICE_THRESHOLDS, "volume_thresholds": DEFAULT_VOLUME_THRESHOLDS,
                          "escalation_thresholds": DEFAULT_ESCALATION_THRESHOLDS},
             "datasets": versions, "is_demo": any(v["is_demo"] for v in versions)}
 
 
-@app.get("/api/regions")
+@api.get("/api/regions")
 def regions(s: Session = Depends(get_session)):
     with_prices = {rid for (rid,) in s.execute(select(ReferencePrice.region_id).distinct())}
     out = []
@@ -110,25 +120,34 @@ def regions(s: Session = Depends(get_session)):
     return out
 
 
-@app.get("/api/reference/prices")
-def reference_prices(region_id: int, quarter: str, zone_id: int | None = None, s: Session = Depends(get_session)):
+@api.get("/api/reference/prices")
+def reference_prices(region_id: int, quarter: str, zone_id: int | None = None, q: str = "", limit: int = 100,
+                     s: Session = Depends(get_session)):
     from .core import calc
     region = s.get(Region, region_id)
     if not region:
         raise HTTPException(404, "Регион не найден")
+    priced = select(ReferencePrice.resource_id).where(ReferencePrice.region_id == region_id).distinct()
+    stmt = select(Resource).where(Resource.id.in_(priced))
+    total_region = s.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    needle = q.strip().lower()
+    rows = [r for r in s.scalars(stmt.order_by(Resource.code))
+            if not needle or needle in r.code.lower() or needle in r.name.lower()]
     idx = calc.IndexBook(s, region_id)
-    out = []
-    for res in s.scalars(select(Resource).order_by(Resource.code)):
+    items = []
+    for res in rows[:max(1, min(limit, 500))]:
         bm = calc.benchmark(s, res, region_id, zone_id, quarter, ["fgiscs", "eis", "market"], idx)
         if not bm.sources:
             continue
-        out.append({"code": res.code, "name": res.name, "unit": res.unit, "group": res.group,
-                    "benchmark": bm.value,
-                    "sources": {sv.source: {"value": sv.value, "count": len(sv.rows)} for sv in bm.sources}})
-    return out
+        items.append({"code": res.code, "name": res.name, "unit": res.unit, "group": res.group, "benchmark": bm.value,
+                      "notes": bm.notes,
+                      "sources": {sv.source: {"value": sv.value, "count": len(sv.rows), "synthetic": sv.synthetic,
+                                              "quarter": sv.rows[0]["quarter"] if sv.source == "fgiscs" else None}
+                                  for sv in bm.sources}})
+    return {"total_region": total_region, "found": len(rows), "items": items}
 
 
-@app.get("/api/reference/analogs")
+@api.get("/api/reference/analogs")
 def analogs(region_id: int, s: Session = Depends(get_session)):
     res = {r.code: r for r in s.scalars(select(Resource))}
     return [{"id": a.id, "object_type": a.object_type, "name": a.name, "capacity": a.capacity, "doc_ref": a.doc_ref,
@@ -139,7 +158,7 @@ def analogs(region_id: int, s: Session = Depends(get_session)):
                                .order_by(AnalogObject.object_type, AnalogObject.id))]
 
 
-@app.get("/api/resources")
+@api.get("/api/resources")
 def resources(q: str = "", unit: str = "", s: Session = Depends(get_session)):
     rows = list(s.scalars(select(Resource).order_by(Resource.code)))
     if unit or q:
@@ -150,19 +169,21 @@ def resources(q: str = "", unit: str = "", s: Session = Depends(get_session)):
     return [{"id": r.id, "code": r.code, "name": r.name, "unit": r.unit, "score": None} for r in rows]
 
 
-@app.post("/api/reference/import")
+@api.post("/api/reference/import")
 async def import_reference(kind: str = Form(...), file: UploadFile = File(...), note: str = Form(""),
-                           s: Session = Depends(get_session)):
+                           s: Session = Depends(get_session), user: User = Depends(require_admin)):
     data = await file.read()
     fns = {"prices": loader.import_prices, "indexes": loader.import_indexes, "analogs": loader.import_analogs}
     try:
         if kind == "resources":
             n = loader.import_resources(s, data)
+            auth.audit(s, user, "Загрузка классификатора ресурсов", file.filename or "", records=n)
             s.commit()
             return {"ok": True, "records": n}
         if kind not in fns:
             raise HTTPException(400, "Вид справочника: prices, indexes, analogs или resources")
         dv = fns[kind](s, data, file.filename or "upload.csv", False, note)
+        auth.audit(s, user, "Загрузка справочника", dv.code, file=file.filename, records=dv.records)
         s.commit()
         return {"ok": True, "version": dv.code, "records": dv.records}
     except loader.ImportError_ as e:
@@ -171,7 +192,7 @@ async def import_reference(kind: str = Form(...), file: UploadFile = File(...), 
 
 
 # ---------------------------------------------------------------- проверки
-@app.get("/api/checks")
+@api.get("/api/checks")
 def list_checks(region_id: int | None = None, level: list[str] = Query(default=[]), status: list[str] = Query(default=[]),
                 q: str = "", s: Session = Depends(get_session)):
     stmt = select(Check).order_by(Check.id.desc())
@@ -205,13 +226,13 @@ def _thr(raw: str | None, default):
     return a, b
 
 
-@app.post("/api/checks")
+@api.post("/api/checks")
 async def create_check(file: UploadFile = File(...), region_id: int = Form(...), zone_id: int | None = Form(None),
                        quarter: str = Form(...), object_type: str = Form(""), capacity: float | None = Form(None),
                        base_quarter: str = Form(""), sources: str = Form('["fgiscs","eis","market"]'),
                        price_thresholds: str = Form(""), volume_thresholds: str = Form(""),
                        escalation_thresholds: str = Form(""), title: str = Form(""),
-                       s: Session = Depends(get_session)):
+                       s: Session = Depends(get_session), user: User = Depends(current_user)):
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "Файл больше 20 МБ")
@@ -232,11 +253,13 @@ async def create_check(file: UploadFile = File(...), region_id: int = Form(...),
     except ParseError as e:
         s.rollback()
         raise HTTPException(422, str(e))
+    auth.audit(s, user, "Проверка документа", check.number, file=check.file_name, sha256=check.file_sha256,
+               result=check.result_sha256)
     s.commit()
     return {"id": check.id, "number": check.number, "warnings": warnings}
 
 
-@app.get("/api/checks/{check_id}")
+@api.get("/api/checks/{check_id}")
 def get_check(check_id: int, s: Session = Depends(get_session)):
     c = _get_check(s, check_id)
     b = _check_brief(c)
@@ -246,8 +269,8 @@ def get_check(check_id: int, s: Session = Depends(get_session)):
     return b
 
 
-@app.post("/api/checks/{check_id}/rerun")
-def rerun(check_id: int, s: Session = Depends(get_session)):
+@api.post("/api/checks/{check_id}/rerun")
+def rerun(check_id: int, s: Session = Depends(get_session), user: User = Depends(current_user)):
     """Повторный расчёт на тех же данных: сравнивает контрольную сумму результата."""
     c = _get_check(s, check_id)
     before = c.result_sha256
@@ -263,18 +286,21 @@ def rerun(check_id: int, s: Session = Depends(get_session)):
         for sg in it.signals:
             s.refresh(sg)
     pipeline.refresh_status(c)
+    auth.audit(s, user, "Повторный расчёт", c.number, identical=before == c.result_sha256)
     s.commit()
     return {"before": before, "after": c.result_sha256, "identical": before == c.result_sha256}
 
 
-@app.delete("/api/checks/{check_id}")
-def delete_check(check_id: int, s: Session = Depends(get_session)):
-    s.delete(_get_check(s, check_id))
+@api.delete("/api/checks/{check_id}")
+def delete_check(check_id: int, s: Session = Depends(get_session), user: User = Depends(require_admin)):
+    c = _get_check(s, check_id)
+    auth.audit(s, user, "Удаление проверки", c.number)
+    s.delete(c)
     s.commit()
     return {"ok": True}
 
 
-@app.get("/api/checks/{check_id}/report.docx")
+@api.get("/api/checks/{check_id}/report.docx")
 def check_report(check_id: int, s: Session = Depends(get_session)):
     c = _get_check(s, check_id)
     data = report.build(c)
@@ -283,12 +309,12 @@ def check_report(check_id: int, s: Session = Depends(get_session)):
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
-@app.get("/api/items/{item_id}/candidates")
+@api.get("/api/items/{item_id}/candidates")
 def item_candidates(item_id: int, s: Session = Depends(get_session)):
     it = s.get(CheckItem, item_id)
     if not it:
         raise HTTPException(404, "Позиция не найдена")
-    rows = list(s.scalars(select(Resource).order_by(Resource.code)))
+    rows = pipeline.region_resources(s, it.check.region_id)
     return [{"id": c.resource_id, "code": c.code, "name": c.name, "unit": c.unit, "score": c.score,
              "level": matching.level(c.score)} for c in matching.candidates(it.code, it.name, it.unit, rows, 8)]
 
@@ -297,8 +323,9 @@ class ManualMatch(BaseModel):
     resource_id: int
 
 
-@app.post("/api/items/{item_id}/match")
-def item_match(item_id: int, body: ManualMatch, s: Session = Depends(get_session)):
+@api.post("/api/items/{item_id}/match")
+def item_match(item_id: int, body: ManualMatch, s: Session = Depends(get_session),
+               user: User = Depends(current_user)):
     it = s.get(CheckItem, item_id)
     res = s.get(Resource, body.resource_id)
     if not it or not res:
@@ -307,12 +334,13 @@ def item_match(item_id: int, body: ManualMatch, s: Session = Depends(get_session
         pipeline.set_manual_match(s, it, res)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    auth.audit(s, user, "Ручное сопоставление", f"{it.check.number}, позиция {it.position}", resource=res.code)
     s.commit()
     return _item(it)
 
 
 # ---------------------------------------------------------------- сигналы и решения
-@app.get("/api/signals/{signal_id}")
+@api.get("/api/signals/{signal_id}")
 def get_signal(signal_id: int, s: Session = Depends(get_session)):
     sg = s.get(Signal, signal_id)
     if not sg:
@@ -331,14 +359,18 @@ class DecisionIn(BaseModel):
     comment: str = Field("", max_length=2000)
 
 
-@app.post("/api/signals/{signal_id}/decision")
-def add_decision(signal_id: int, body: DecisionIn, s: Session = Depends(get_session)):
+@api.post("/api/signals/{signal_id}/decision")
+def add_decision(signal_id: int, body: DecisionIn, s: Session = Depends(get_session),
+                 user: User = Depends(current_user)):
     sg = s.get(Signal, signal_id)
     if not sg:
         raise HTTPException(404, "Сигнал не найден")
     if body.outcome not in DECISIONS:
         raise HTTPException(422, "Неизвестный вариант решения")
-    s.add(Decision(signal_id=sg.id, outcome=body.outcome, comment=body.comment.strip()))
+    s.add(Decision(signal_id=sg.id, outcome=body.outcome, comment=body.comment.strip(),
+                   author=f"{user.name} ({user.login})"))
+    auth.audit(s, user, "Решение по сигналу", f"{sg.item.check.number}, позиция {sg.item.position}, {sg.kind}",
+               outcome=body.outcome)
     s.flush()
     s.refresh(sg)
     pipeline.refresh_status(sg.item.check)
@@ -346,7 +378,7 @@ def add_decision(signal_id: int, body: DecisionIn, s: Session = Depends(get_sess
     return _signal(sg, full=True)
 
 
-@app.get("/api/journal")
+@api.get("/api/journal")
 def journal(s: Session = Depends(get_session)):
     out = []
     for d in s.scalars(select(Decision).order_by(Decision.id.desc())):
@@ -358,7 +390,7 @@ def journal(s: Session = Depends(get_session)):
     return out
 
 
-@app.get("/api/demo")
+@api.get("/api/demo")
 def demo_files(s: Session = Depends(get_session)):
     """Демонстрационные сметы с заранее известными отклонениями и параметрами для подстановки в форму."""
     manifest = DEMO_DIR / "expected.json"
@@ -375,7 +407,7 @@ def demo_files(s: Session = Depends(get_session)):
     return out
 
 
-@app.get("/api/demo/{name}")
+@api.get("/api/demo/{name}")
 def demo_file(name: str):
     path = (DEMO_DIR / name).resolve()
     if path.parent != DEMO_DIR.resolve() or not path.is_file() or path.suffix != ".xlsx":
@@ -386,6 +418,54 @@ def demo_file(name: str):
 @app.get("/api/health")
 def health(s: Session = Depends(get_session)):
     return {"ok": True, "checks": s.scalar(select(func.count()).select_from(Check))}
+
+
+# ---------------------------------------------------------------- вход и аудит
+class LoginIn(BaseModel):
+    login: str
+    password: str
+
+
+def _me(u: User) -> dict:
+    return {"login": u.login, "name": u.name, "role": u.role, "role_title": auth.ROLE_TITLES[u.role]}
+
+
+@app.post("/api/login")
+def do_login(body: LoginIn, s: Session = Depends(get_session)):
+    tok = auth.login(s, body.login.strip(), body.password)
+    if not tok:
+        raise HTTPException(401, "Неверный логин или пароль")
+    auth.audit(s, tok.user, "Вход")
+    s.commit()
+    resp = JSONResponse(_me(tok.user))
+    resp.set_cookie(auth.COOKIE, tok.token, httponly=True, samesite="lax", max_age=12 * 3600)
+    return resp
+
+
+@app.post("/api/logout")
+def do_logout(request: Request, s: Session = Depends(get_session)):
+    from .models import SessionToken
+    token = request.cookies.get(auth.COOKIE)
+    if token and (tok := s.get(SessionToken, token)):
+        s.delete(tok)
+        s.commit()
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE)
+    return resp
+
+
+@api.get("/api/me")
+def me(user: User = Depends(current_user)):
+    return _me(user)
+
+
+@api.get("/api/audit")
+def audit_log(s: Session = Depends(get_session), _: User = Depends(require_admin)):
+    return [{"id": e.id, "at": e.at.isoformat(), "user": e.user_login, "action": e.action, "object": e.object_ref,
+             "details": e.details} for e in s.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(500))]
+
+
+app.include_router(api)
 
 
 # ---------------------------------------------------------------- интерфейс

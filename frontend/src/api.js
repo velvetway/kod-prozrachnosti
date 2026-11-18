@@ -1,5 +1,6 @@
 async function request(path, options = {}) {
-  const res = await fetch(path, options)
+  const res = await fetch(path, { credentials: 'same-origin', ...options })
+  if (res.status === 401 && path !== '/api/login') window.dispatchEvent(new Event('auth-required'))
   if (!res.ok) {
     let msg = `Ошибка ${res.status}`
     try {
@@ -14,6 +15,10 @@ async function request(path, options = {}) {
 const json = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 export const api = {
+  me: () => request('/api/me'),
+  login: (login, password) => request('/api/login', json({ login, password })),
+  logout: () => request('/api/logout', { method: 'POST' }),
+  audit: () => request('/api/audit'),
   meta: () => request('/api/meta'),
   regions: () => request('/api/regions'),
   checks: (params) => request('/api/checks?' + params.toString()),

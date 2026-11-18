@@ -13,7 +13,6 @@ def _levels(item):
 def test_every_expected_outcome(client, demo):
     for name, exp in EXPECTED.items():
         check = run_demo(client, demo[name])
-        assert check["is_demo"]
         for item, e in zip(check["items"], exp["items"]):
             want = e["expected"]
             got = _levels(item)
@@ -30,24 +29,28 @@ def test_every_expected_outcome(client, demo):
 
 def test_school_summary(client, demo):
     s = run_demo(client, demo["01_bryansk_school_smeta.xlsx"])["summary"]
-    assert (s["items"], s["matched"], s["high"], s["medium"], s["review"]) == (12, 11, 2, 2, 1)
+    assert (s["items"], s["matched"], s["high"], s["medium"], s["review"]) == (11, 10, 2, 2, 1)
 
 
-def test_zone_matters(client, demo):
-    """Те же цены северного района Томской области дают сигналы, если сравнить их с зоной 1."""
+def test_region_matters(client, demo):
+    """Одна и та же спецификация, проверенная по ценам другого региона, даёт другие ориентиры."""
     d = dict(demo["02_tomsk_polyclinic_spec.xlsx"])
-    regions = {r["id"]: r for r in client.get("/api/regions").json()}
-    zone1 = regions[d["region_id"]]["zones"][0]["id"]
-    assert zone1 != d["zone_id"]
+    regions = {r["name"]: r for r in client.get("/api/regions").json()}
+    other = regions["Брянская область"]
     right = run_demo(client, d)
-    wrong = run_demo(client, d | {"zone_id": zone1})
-    price = lambda c: [s["level"] for it in c["items"] for s in it["signals"] if s["kind"] == "price"]
-    assert set(price(right)) == {"none"}
-    assert "none" not in price(wrong)          # ~ +23 %: каждая позиция получает сигнал
+    wrong = run_demo(client, d | {"region_id": other["id"], "zone_id": other["zones"][0]["id"]})
+    bench = lambda c: [next(s["benchmark"] for s in it["signals"] if s["kind"] == "price") for it in c["items"]]
+    assert bench(right) != bench(wrong)
+    assert right["summary"]["high"] + right["summary"]["medium"] == 2      # только удорожание
 
 
-def test_disabled_source_changes_benchmark(client, demo):
+def test_real_fgiscs_only(client, demo):
+    """Расчёт только по реальным сметным ценам ФГИС ЦС даёт те же сигналы, что и по трём источникам."""
     d = demo["01_bryansk_school_smeta.xlsx"]
     only = run_demo(client, d, sources='["fgiscs"]')
+    both = run_demo(client, d)
+    levels = lambda c: [[s["level"] for s in it["signals"]] for it in c["items"]]
+    assert levels(only) == levels(both)
     first = only["items"][0]["signals"][0]
-    assert first["benchmark"] == 7420.0          # демо-сметная цена ФГИС ЦС на III кв. 2026
+    assert first["benchmark"] == 6994.01          # сметная цена ФГИС ЦС 04.1.02.05-0184, Брянская обл., III кв. 2026
+    assert first["deviation_pct"] == 33.0
