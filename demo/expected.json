@@ -1,0 +1,168 @@
+[
+ {
+  "file": "01_bryansk_school_smeta.xlsx",
+  "title": "Локальный сметный расчёт № ДЕМО-1. Капитальный ремонт здания школы. Ведомость материальных ресурсов",
+  "region": "Брянская область",
+  "zone": 1,
+  "quarter": "2026-Q3",
+  "object_type": "Школа",
+  "capacity": 4200,
+  "base_quarter": null,
+  "items": [
+   {
+    "position": 1,
+    "name": "Бетон тяжёлый, класс B25 (М350)",
+    "expected": "price:high"
+   },
+   {
+    "position": 2,
+    "name": "Арматурная сталь класса А500С d=12мм",
+    "expected": "price:none; конверсия кг→т"
+   },
+   {
+    "position": 3,
+    "name": "Кирпич керамический рядовой полнотелый М150",
+    "expected": "price:none"
+   },
+   {
+    "position": 4,
+    "name": "Плиты теплоизоляционные из минеральной ваты 125кг/м3",
+    "expected": "price:medium"
+   },
+   {
+    "position": 5,
+    "name": "Листы гипсокартонные ГКЛ 12,5 мм",
+    "expected": "price:none"
+   },
+   {
+    "position": 6,
+    "name": "Плитка керамическая для полов",
+    "expected": "price:none"
+   },
+   {
+    "position": 7,
+    "name": "Линолеум гетерогенный коммерческий",
+    "expected": "volume:high"
+   },
+   {
+    "position": 8,
+    "name": "Краска водно-дисперсионная для внутренних работ",
+    "expected": "price:none"
+   },
+   {
+    "position": 9,
+    "name": "Кабель ВВГнг-LS 3x2.5",
+    "expected": "price:none"
+   },
+   {
+    "position": 10,
+    "name": "Блок оконный ПВХ с двухкамерным стеклопакетом",
+    "expected": "price:medium"
+   },
+   {
+    "position": 11,
+    "name": "Бетон тяжёлый для подготовки, класс В15",
+    "expected": "price:review (низкая сопоставимость)"
+   },
+   {
+    "position": 12,
+    "name": "Панели фасадные композитные алюминиевые",
+    "expected": "нет ориентира"
+   }
+  ]
+ },
+ {
+  "file": "02_tomsk_polyclinic_spec.xlsx",
+  "title": "Спецификация ДЕМО-2. Поставка строительных материалов для капитального ремонта поликлиники (северный район)",
+  "region": "Томская область",
+  "zone": 2,
+  "quarter": "2026-Q3",
+  "object_type": "Поликлиника",
+  "capacity": 3600,
+  "base_quarter": "2025-Q4",
+  "items": [
+   {
+    "position": 1,
+    "name": "Бетон тяжёлый, класс B25 (М350)",
+    "expected": "price:none (цена зоны 2)"
+   },
+   {
+    "position": 2,
+    "name": "Арматура А500С, диаметр 16 мм",
+    "expected": "price:none"
+   },
+   {
+    "position": 3,
+    "name": "Блоки из ячеистого бетона D500, 600×300×200 мм",
+    "expected": "price:none"
+   },
+   {
+    "position": 4,
+    "name": "Плиты минераловатные теплоизоляционные, плотность 125 кг/м3",
+    "expected": "price:none"
+   },
+   {
+    "position": 5,
+    "name": "Листы гипсокартонные ГКЛ 12,5 мм",
+    "expected": "price:none"
+   },
+   {
+    "position": 6,
+    "name": "Плитка керамическая для полов",
+    "expected": "price:none"
+   },
+   {
+    "position": 7,
+    "name": "Линолеум коммерческий гетерогенный",
+    "expected": "price:none"
+   },
+   {
+    "position": 8,
+    "name": "Краска водно-дисперсионная для внутренних работ",
+    "expected": "price:none"
+   },
+   {
+    "position": 9,
+    "name": "Кабель силовой ВВГнг(А)-LS 3×2,5",
+    "expected": "escalation:high"
+   },
+   {
+    "position": 10,
+    "name": "Блок оконный ПВХ с двухкамерным стеклопакетом",
+    "expected": "escalation:medium"
+   }
+  ]
+ },
+ {
+  "file": "03_bryansk_road_smeta.xlsx",
+  "title": "Локальный сметный расчёт № ДЕМО-3. Благоустройство территории, ремонт проездов и тротуаров",
+  "region": "Брянская область",
+  "zone": 1,
+  "quarter": "2026-Q2",
+  "object_type": "Дорога, благоустройство",
+  "capacity": 6000,
+  "base_quarter": null,
+  "items": [
+   {
+    "position": 1,
+    "name": "Смесь асфальтобетонная горячая плотная, тип Б",
+    "expected": "price:none"
+   },
+   {
+    "position": 2,
+    "name": "Камень бортовой бетонный БР 100.30.15",
+    "expected": "price:none"
+   },
+   {
+    "position": 3,
+    "name": "Щебень гранитный фракции 20–40 мм",
+    "expected": "price:none"
+   },
+   {
+    "position": 4,
+    "name": "Песок строительный для строительных работ",
+    "expected": "price:none"
+   }
+  ]
+ }
+]
