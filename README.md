@@ -30,6 +30,11 @@
 Требования: Docker с Compose v2, **или** Python 3.12+ (без Docker). Node.js 20+ нужен только для
 пересборки интерфейса.
 
+### macOS — двойной щелчок
+
+`start.command` в корне: запускает через Docker (Docker Desktop или OrbStack), а если Docker нет —
+через Python; затем открывает браузер.
+
 ### Docker
 
 ```bash
