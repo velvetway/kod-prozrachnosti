@@ -4,5 +4,4 @@
 __pycache__/
 data/app.db
 data/uploads/
-frontend/dist/
 node_modules/

@@ -1,5 +1,4 @@
 **/node_modules
-frontend/dist
 data/app.db
 data/uploads
 **/__pycache__

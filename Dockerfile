@@ -1,12 +1,6 @@
-# 1. Сборка интерфейса
-FROM node:22-alpine AS web
-WORKDIR /web
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --no-audit --no-fund
-COPY frontend ./
-RUN npm run build
-
-# 2. Сервер
+# Сервер с уже собранным интерфейсом (frontend/dist лежит в репозитории).
+# Интерфейс не собирается в образе: сборка React в Docker на arm64 падала из-за
+# нативного парсера Rollup. Пересобрать интерфейс: cd frontend && npm ci && npm run build.
 FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/app/data
 WORKDIR /app
@@ -15,7 +9,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend backend
 COPY data/reference data/reference
 COPY demo demo
-COPY --from=web /web/dist frontend/dist
+COPY frontend/dist frontend/dist
 WORKDIR /app/backend
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
