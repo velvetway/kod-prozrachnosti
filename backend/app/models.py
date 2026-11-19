@@ -51,10 +51,10 @@ class Resource(Base):
     __tablename__ = "ksr_resource"
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(40), unique=True)
-    name: Mapped[str] = mapped_column(String(300))
+    name: Mapped[str] = mapped_column(Text)
     unit: Mapped[str] = mapped_column(String(30))
     group: Mapped[str] = mapped_column(String(60))
-    attributes: Mapped[str] = mapped_column(String(300), default="")
+    attributes: Mapped[str] = mapped_column(Text, default="")
 
 
 class ReferencePrice(Base):
@@ -67,7 +67,7 @@ class ReferencePrice(Base):
     source: Mapped[str] = mapped_column(String(20))        # fgiscs | eis | market
     price: Mapped[float] = mapped_column(Float)            # руб. за единицу ресурса, без НДС
     quarter: Mapped[str] = mapped_column(String(7))        # 2026-Q3
-    doc_ref: Mapped[str] = mapped_column(String(300), default="")
+    doc_ref: Mapped[str] = mapped_column(Text, default="")
     doc_url: Mapped[str] = mapped_column(String(500), default="")
     resource: Mapped[Resource] = relationship()
     zone: Mapped[PriceZone | None] = relationship()
@@ -91,10 +91,10 @@ class AnalogObject(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     region_id: Mapped[int] = mapped_column(ForeignKey("region.id"))
     object_type: Mapped[str] = mapped_column(String(60))
-    name: Mapped[str] = mapped_column(String(300))
+    name: Mapped[str] = mapped_column(Text)
     capacity: Mapped[float] = mapped_column(Float)          # м² (для дорог — м² покрытия)
     consumption: Mapped[dict] = mapped_column(JSON)         # {код КСР: расход на 1 м²}
-    doc_ref: Mapped[str] = mapped_column(String(300), default="")
+    doc_ref: Mapped[str] = mapped_column(Text, default="")
     dataset_id: Mapped[int] = mapped_column(ForeignKey("dataset_version.id"))
 
 
@@ -103,7 +103,7 @@ class Check(Base):
     __tablename__ = "check_run"
     id: Mapped[int] = mapped_column(primary_key=True)
     number: Mapped[str] = mapped_column(String(30), unique=True)
-    title: Mapped[str] = mapped_column(String(400))
+    title: Mapped[str] = mapped_column(Text)
     file_name: Mapped[str] = mapped_column(String(255))
     file_sha256: Mapped[str] = mapped_column(String(64))
     region_id: Mapped[int] = mapped_column(ForeignKey("region.id"))
@@ -130,7 +130,7 @@ class CheckItem(Base):
     position: Mapped[int] = mapped_column(Integer)
     source_row: Mapped[int] = mapped_column(Integer)
     code: Mapped[str] = mapped_column(String(40), default="")
-    name: Mapped[str] = mapped_column(String(400))
+    name: Mapped[str] = mapped_column(Text)
     unit: Mapped[str] = mapped_column(String(30))
     quantity: Mapped[float] = mapped_column(Float)
     price: Mapped[float] = mapped_column(Float)
